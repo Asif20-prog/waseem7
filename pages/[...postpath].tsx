@@ -7,8 +7,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     const endpoint = process.env.GRAPHQL_ENDPOINT as string;
     const graphQLClient = new GraphQLClient(endpoint);
 
-    const pathArr = ctx.query.postpath as Array<string>;
-    const path = pathArr.join('/');
+    const pathArr = ctx.query.postpath as string[]; // Ensuring it's an array
+    const path = pathArr ? pathArr.join('/') : '';
 
     console.log("Fetching post for path:", path);
 
@@ -22,14 +22,24 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         }
     `;
 
-    const variables = { path: `/${path}/` };
+    // FIXED: Removing extra slash from path
+    const variables = { path: path.replace(/^\/|\/$/g, '') };
 
     try {
         const data = await graphQLClient.request(query, variables);
+        
+        // Debugging response
+        console.log("GraphQL Response:", JSON.stringify(data, null, 2));
+
+        if (!data?.post) {
+            console.warn("Post not found for path:", path);
+            return { notFound: true };
+        }
+
         return { props: { post: data.post } };
     } catch (error) {
         console.error("GraphQL Error:", error);
-        return { props: { post: null, error: "Post not found" } };
+        return { props: { post: null, error: "Post not found or API error" } };
     }
 };
 
