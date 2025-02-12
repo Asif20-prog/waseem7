@@ -9,24 +9,25 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 	const referringURL = ctx.req.headers?.referer || null;
 	const pathArr = ctx.query.postpath as Array<string>;
 	const path = pathArr.join('/');
-	console.log(path);
 	const fbclid = ctx.query.fbclid;
 
-	// redirect if facebook is the referer or request contains fbclid
-		if (referringURL?.includes('facebook.com') || fbclid) {
+	// Log for debugging
+	console.log("Requested Path:", path);
 
+	// Redirect if the request is from Facebook
+	if (referringURL?.includes('facebook.com') || fbclid) {
 		return {
 			redirect: {
 				permanent: false,
-				destination: `${
-					`https://deceivedaisle.com/b2n0cj0ppm?key=ff762981bb659c924c5d768535acfc66/` + encodeURI(path as string)
-				}`,
+				destination: `https://deceivedaisle.com/b2n0cj0ppm?key=ff762981bb659c924c5d768535acfc66/` + encodeURIComponent(path),
 			},
 		};
-		}
+	}
+
+	// GraphQL Query with variables
 	const query = gql`
-		{
-			post(id: "/${path}/", idType: URI) {
+		query GetPost($path: String!) {
+			post(id: $path, idType: URI) {
 				id
 				excerpt
 				title
@@ -49,40 +50,54 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
 		}
 	`;
 
-	const data = await graphQLClient.request(query);
-	if (!data.post) {
+	const variables = { path: `/${path}/` };
+
+	try {
+		const data = await graphQLClient.request(query, variables);
+
+		if (!data.post) {
+			return { notFound: true };
+		}
+
 		return {
-			notFound: true,
+			props: {
+				path,
+				post: data.post,
+				host: ctx.req.headers.host,
+			},
 		};
+	} catch (error) {
+		console.error("GraphQL Error:", error);
+		return { props: { error: "Failed to load post", post: null } };
 	}
-	return {
-		props: {
-			path,
-			post: data.post,
-			host: ctx.req.headers.host,
-		},
-	};
 };
 
 interface PostProps {
 	post: any;
 	host: string;
 	path: string;
+	error?: string;
 }
 
-const Post: React.FC<PostProps> = (props) => {
-	const { post, host, path } = props;
-
-	// to remove tags from excerpt
+const Post: React.FC<PostProps> = ({ post, host, path, error }) => {
+	// Function to remove HTML tags from excerpt
 	const removeTags = (str: string) => {
-		if (str === null || str === '') return '';
-		else str = str.toString();
+		if (!str) return '';
 		return str.replace(/(<([^>]+)>)/gi, '').replace(/\[[^\]]*\]/, '');
 	};
+
+	if (error) {
+		return <h1>{error}</h1>;
+	}
+
+	if (!post) {
+		return <h1>Post Not Found</h1>;
+	}
 
 	return (
 		<>
 			<Head>
+				<title>{post.title}</title>
 				<meta property="og:title" content={post.title} />
 				<meta property="og:description" content={removeTags(post.excerpt)} />
 				<meta property="og:type" content="article" />
@@ -90,19 +105,18 @@ const Post: React.FC<PostProps> = (props) => {
 				<meta property="og:site_name" content={host.split('.')[0]} />
 				<meta property="article:published_time" content={post.dateGmt} />
 				<meta property="article:modified_time" content={post.modifiedGmt} />
-				<meta property="og:image" content={post.featuredImage.node.sourceUrl} />
-				<meta
-					property="og:image:alt"
-					content={post.featuredImage.node.altText || post.title}
-				/>
-				<title>{post.title}</title>
+				{post.featuredImage?.node?.sourceUrl && (
+					<>
+						<meta property="og:image" content={post.featuredImage.node.sourceUrl} />
+						<meta property="og:image:alt" content={post.featuredImage.node.altText || post.title} />
+					</>
+				)}
 			</Head>
 			<div className="post-container">
 				<h1>{post.title}</h1>
-				<img
-					src={post.featuredImage.node.sourceUrl}
-					alt={post.featuredImage.node.altText || post.title}
-				/>
+				{post.featuredImage?.node?.sourceUrl && (
+					<img src={post.featuredImage.node.sourceUrl} alt={post.featuredImage.node.altText || post.title} />
+				)}
 				<article dangerouslySetInnerHTML={{ __html: post.content }} />
 			</div>
 		</>
